@@ -65,7 +65,7 @@ class decoder(nn.Module):
         return self.decoder(input)
     
 class DenseUNet(nn.Module):
-    def __init__(self, block = conv_block, in_channels=3, out_channels=2, num_blocks=[2,2,2,2,2], idea_mode = False):
+    def __init__(self, block = conv_block, in_channels=3, out_channels=1, num_blocks=[2,2,2,2,2], idea_mode = False):
         super(DenseUNet, self).__init__()
         
         self.idea_mode = idea_mode
