@@ -41,38 +41,43 @@ class up_sample_transition_block(nn.Module):
         return self.block(input)
 
 class encoder(nn.Module):
-    def __init__(self, block, in_channels, out_channels, num_block):
+    def __init__(self, block, in_channels, out_channels, num_block, down_sample=True):
         super(encoder, self).__init__()
 
         self.encoder = nn.Sequential(
-            *[block(in_channels, in_channels) for _ in range(num_block)],
-            down_sample_transition_block(in_channels, out_channels)
+            *[block(in_channels, in_channels) for _ in range(num_block)]
         )
+
+        if down_sample:
+            self.encoder.append(down_sample_transition_block(in_channels, out_channels))
         
     def forward(self, input):
         return self.encoder(input)
     
 class decoder(nn.Module):
-    def __init__(self, block, in_channels, out_channels, num_block):
+    def __init__(self, block, in_channels, out_channels, num_block, up_sample=True):
         super(decoder, self).__init__()
-
+        
         self.decoder = nn.Sequential(
-            *[block(in_channels, in_channels) for _ in range(num_block)],
-            up_sample_transition_block(in_channels, out_channels)
+            *[block(in_channels, in_channels) for _ in range(num_block)]
         )
+
+        if up_sample:
+            self.decoder.append(up_sample_transition_block(in_channels, out_channels))
         
     def forward(self, input):
         return self.decoder(input)
     
 class DenseUNet(nn.Module):
-    def __init__(self, block = conv_block, in_channels=3, out_channels=1, num_blocks=[2,2,2,2,2], idea_mode = False):
+    def __init__(self, block = conv_block, in_channels=3, out_channels=1, num_blocks=[2,2,2,2,2], mode = 'default'):
         super(DenseUNet, self).__init__()
         
-        self.idea_mode = idea_mode
+        self.mode = mode
         n1 = 64
         filter = [n1, n1 * 2, n1 * 4, n1 * 8, n1 * 16]
 
-        self.encoder1 = encoder(block, in_channels, filter[0], num_blocks[0])
+        # self.encoder1 = encoder(block, in_channels, filter[0], num_blocks[0], down_sample=False)
+        self.encoder1 = block(in_channels, filter[0])
         self.encoder2 = encoder(block, filter[0], filter[1], num_blocks[1])
         self.encoder3 = encoder(block, filter[1], filter[2], num_blocks[2])
         self.encoder4 = encoder(block, filter[2], filter[3], num_blocks[3])
@@ -82,7 +87,21 @@ class DenseUNet(nn.Module):
         self.decoder2 = decoder(block, filter[3], filter[2], num_blocks[3])
         self.decoder3 = decoder(block, filter[2], filter[1], num_blocks[2])
         self.decoder4 = decoder(block, filter[1], filter[0], num_blocks[1])
-        self.decoder5 = decoder(block, filter[0], out_channels, num_blocks[0])
+        # self.decoder5 = decoder(block, filter[0], out_channels, num_blocks[0], up_sample=False)
+        self.decoder5 = block(filter[0], out_channels)
+
+        self.down_sample1 = down_sample_transition_block(filter[2], filter[3])
+        self.down_sample2 = down_sample_transition_block(filter[1], filter[2])
+        self.down_sample3 = down_sample_transition_block(filter[0], filter[1])
+
+        self.up_sample1 = up_sample_transition_block(filter[3], filter[2])
+        self.up_sample2 = up_sample_transition_block(filter[2], filter[1])
+        self.up_sample3 = up_sample_transition_block(filter[1], filter[0])
+
+        self.transform1 = nn.Conv2d(filter[4], filter[3], kernel_size=1, padding=0, bias=True)
+        self.transform2 = nn.Conv2d(filter[3], filter[2], kernel_size=1, padding=0, bias=True)
+        self.transform3 = nn.Conv2d(filter[2], filter[1], kernel_size=1, padding=0, bias=True)
+        self.transform4 = nn.Conv2d(filter[1], filter[0], kernel_size=1, padding=0, bias=True)
 
     def forward(self, input):
         e1 = self.encoder1(input)
@@ -91,19 +110,26 @@ class DenseUNet(nn.Module):
         e4 = self.encoder4(e3)
         e5 = self.encoder5(e4)
 
-        if not self.idea_mode:
+        if self.mode == 'default':
             d4 = self.decoder1(e5)
             d3 = self.decoder2(d4)
             d2 = self.decoder3(d3)
             d1 = self.decoder4(d2)
-        else:
-            None
-            # 这部分还在写
+        elif self.mode == 'comcat':
+            d4 = self.transform1(torch.cat((self.decoder1(e5),e4),dim=1))
+            d3 = self.transform2(torch.cat((self.decoder2(d4),e3),dim=1))
+            d2 = self.transform3(torch.cat((self.decoder3(d3),e2),dim=1))
+            d1 = self.transform4(torch.cat((self.decoder4(d2),e1),dim=1))
+        elif self.mode == 'idea':
+            d4 = self.transform1(torch.cat((self.decoder1(e5),self.down_sample1(e3)-e4),dim=1))
+            d3 = self.transform2(torch.cat((self.decoder2(d4),self.down_sample2(e2)-e3),dim=1))
+            d2 = self.transform3(torch.cat((self.decoder3(d3),self.down_sample3(e1)-e2),dim=1))
+            d1 = self.transform4(torch.cat((self.decoder4(d2),e1),dim=1))
 
         output = self.decoder5(d1)
         return output
 
-# model = DenseUNet()
+# model = DenseUNet(mode='idea')
 # input = torch.randn(1, 3, 320, 640)
 # output = model(input)
 # print(output.shape)
