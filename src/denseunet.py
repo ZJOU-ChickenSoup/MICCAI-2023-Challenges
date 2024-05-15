@@ -143,7 +143,7 @@ class DenseUNet(nn.Module):
         output = self.decoder7(d1)
         return output
 
-model = DenseUNet(mode='idea')
-input = torch.randn(1, 3, 320, 640)
-output = model(input)
-print(output.shape)
+# model = DenseUNet(mode='idea')
+# input = torch.randn(1, 3, 320, 640)
+# output = model(input)
+# print(output.shape)
